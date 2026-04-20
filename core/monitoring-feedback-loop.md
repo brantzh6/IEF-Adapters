@@ -1,8 +1,8 @@
 # 监控反馈闭环机制
 
-> 定义 Agent 工作过程中的日志规范、审计流程和反馈任务生成机制。
+> 定义 Agent 工作过程中的日志规范、审计流程和 finding 输出机制。
 > 按 Gate Profile 分级（G-Lite / G-Std / G-Full），项目根据治理等级选择适用层级。
-> 闭环目标：日志 → 发现问题 → 创建任务 → 回到 Design 阶段。
+> Harness 职责边界：日志 → 发现问题 → 输出标准 finding_report。任务创建和调度由外部任务体系负责。
 
 ---
 
@@ -107,12 +107,12 @@ selection_reason: capability_match / user_request / fallback / independence_requ
 
 ---
 
-### 2.3 G-Full (T3) — 完整闭环含自动任务创建
+### 2.3 G-Full (T3) — 完整闭环含偏差检测
 
 **要求**：
 - G-Std 全部 +
 - 设计-实现偏差检测
-- 自动创建已分类的反馈任务
+- 输出标准 finding_report（交由外部任务体系处理，见 `integration-interfaces.md` §4）
 - 趋势追踪
 
 **设计-实现偏差检测**：
@@ -127,22 +127,31 @@ selection_reason: capability_match / user_request / fallback / independence_requ
 4. 如发现偏差 → 创建偏差分析报告
 ```
 
-**自动任务创建**：
+**发现输出**：
 
-当检测到问题时，自动创建新任务并分类：
+当检测到问题时，输出标准 `finding_report` 格式（详见 `integration-interfaces.md` §4）：
 
 ```yaml
-# Auto-generated Feedback Task
-source: monitoring_feedback_loop
-trigger: <检测模式名称>
-evidence: <日志引用>
-suggested_classification:
-  risk: R2  # 由严重度决定
-  class: B  # 由问题类型决定
-  template: T2
-action: refactor / fix / investigate / update_config
-priority: normal / high / urgent
+# Finding Report Output
+schema_version: "1.0"
+type: finding_report
+generated_by: monitoring_loop
+finding:
+  title: "<问题标题>"
+  severity: HIGH / MEDIUM / LOW
+  pattern: "<匹配到的检测模式>"
+  evidence:
+    - log_ref: "<日志文件路径>"
+suggested_action:
+  type: refactor / fix / investigate / update_config
+  suggested_classification:
+    risk: R2
+    class: B
+    template: T2
 ```
+
+> 注意：Harness 只输出发现，不负责任务创建和调度。
+> 当外部任务体系未接入时，直接呈现给用户决策。
 
 **趋势追踪指标**：
 
@@ -159,11 +168,13 @@ priority: normal / high / urgent
 ## 3. 反馈闭环流程
 
 ```
-日志采集 → 模式检测 → 问题识别 → 任务创建 → 回到 SDLC Design 阶段
-     ↑                                                        |
-     |________________________________________________________|
-                         (持续改进循环)
+日志采集 → 模式检测 → 问题识别 → [输出 finding_report] → 外部任务体系 → SDLC Design
+     ↑                                                                        |
+     |________________________________________________________________________|
+                              (持续改进循环)
 ```
+
+> Harness 负责到 finding_report 输出为止。后续调度由任务体系负责。
 
 ### 3.1 G-Std 闭环（手动触发）
 
@@ -179,10 +190,10 @@ priority: normal / high / urgent
 
 ```
 1. 每完成 N 个任务（或定期），自动触发审计
-2. 检测到问题 → 自动创建反馈任务（含分类）
-3. 反馈任务进入 SDLC 管道（Design 阶段）
-4. Agent 按正常生命周期处理
-5. 处理完成后，日志中标记"反馈任务已关闭"
+2. 检测到问题 → 输出 finding_report
+3. 外部任务体系接收 → 创建任务 → 进入 SDLC 管道
+4. 无任务体系时 → 直接呈现给用户，用户决策后按 SDLC 流程处理
+5. 处理完成后，日志中标记"finding 已关闭"
 6. 持续追踪：如果同类问题 7 天内再次出现 → 自动升级严重度
 ```
 
