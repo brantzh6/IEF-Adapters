@@ -1,6 +1,7 @@
 # 模型路由策略 — 通用模板
 
 > 本模板指导 AI Agent 如何在自身工作与 Claude Worker 外部审查之间分配任务。
+> 模型选择基于 `model-registry.md` 中的能力标签，而非硬编码。
 > 项目使用时需根据实际情况调整。
 
 ---
@@ -147,7 +148,51 @@ Agent 不得：
 
 ---
 
-## 6. 路由记录格式
+## 6. 模型选择算法
+
+当 Claude Worker 被触发时，按以下算法选择具体模型：
+
+### 6.1 选择流程
+
+```
+输入: task_type + risk_level + change_class
+
+1. 确定 required_capabilities
+   - task_type → 查 model-registry.md §3.1 能力需求映射表
+   - risk_level → 查 model-registry.md §3.2 风险等级加权
+
+2. 匹配 registry 中的模型
+   - 过滤：满足最低评分要求的模型
+   - 排序：按加权总分从高到低
+   - 选择：取排名第一
+
+3. 独立性检查（仅 review 场景）
+   - R3 / Class C/D：优先选择与 Host Agent 不同的 provider
+   - 确保 reviewer 与 implementer 视角独立
+
+4. Fallback
+   - 首选不可用 → 同 provider 降级
+   - Provider 不可用 → 切换到同能力等级的备用
+   - 全部不可用 → 上报用户
+```
+
+### 6.2 快速参考表
+
+| 场景 | 推荐能力组合 | 典型匹配 |
+|------|-------------|----------|
+| 日常编码 | coding + speed | qwen3.6-plus |
+| 高风险编码 | coding + reasoning | glm-5, qwen3-max |
+| 标准 review | review + reasoning | qwen3.6-plus, kimi-k2.5 |
+| 高风险 review | review + reasoning + architecture | glm-5.1, claude-opus |
+| 架构设计 | architecture + reasoning + long-context | qwen3-max, claude-opus |
+| 批量任务 | speed + coding | MiniMax-M2.5, qwen3-coder-plus |
+| 仲裁 | 独立 provider + review + reasoning | openrouter/claude-opus |
+
+> 注意：以上「典型匹配」仅为当前 registry 快照，实际选择应查 model-registry.md 实时数据。
+
+---
+
+## 7. 路由记录格式
 
 每个非 trivial 任务，Agent 必须记录路由决策：
 
@@ -158,5 +203,7 @@ Change Class: A / B / C / D
 Executor: Host Agent / Claude Worker
 Review Model: Agent self-check / Agent role-switch / Claude Worker
 Claude Worker Used: yes / no
+Model Selected: <provider>/<model> (如使用 Claude Worker)
+Selection Reason: <基于能力标签匹配 / 指定 / fallback>
 Reason: <升级理由或不升级理由>
 ```

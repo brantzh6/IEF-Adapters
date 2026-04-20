@@ -50,20 +50,21 @@ Harness-4-AIAgents/
 ├── core/                              # 通用核心规约（Agent 无关）
 │   ├── sdlc-governance.md             # SDLC v3.1 完整治理合同
 │   ├── claude-worker-skill.md         # Claude Worker 调用参考
-│   └── model-routing-policy.md        # 模型路由策略模板
+│   ├── model-routing-policy.md        # 模型路由策略（基于能力标签）
+│   ├── model-registry.md              # 模型注册表（能力评分 + Provider 映射）
+│   ├── leaderboard-sources.md         # Leaderboard 数据源与更新流程
+│   └── monitoring-feedback-loop.md    # 监控反馈闭环机制
 ├── adapters/
 │   ├── qoder/                         # Qoder IDE 适配包
 │   │   ├── rules/sdlc-governance.md   # Qoder 版 SDLC 规则
 │   │   ├── agents/claude-worker.md    # Claude Worker Agent 定义
-│   │   └── skills/sdlc-init/SKILL.md  # 一键项目初始化 Skill
+│   │   └── skills/                    # sdlc-init + log-audit
 │   ├── hermes/                        # Hermes Agent 适配包
-│   │   ├── skills/sdlc-harness/       # SDLC 治理 Skill
-│   │   ├── skills/claude-worker/      # Claude Worker Skill
+│   │   ├── skills/                    # sdlc-harness + claude-worker + log-audit
 │   │   ├── AGENTS.md                  # 项目上下文模板
 │   │   └── init.sh                    # 一键初始化脚本
 │   └── openclaw/                      # OpenClaw Agent 适配包
-│       ├── skills/sdlc-harness/       # SDLC 治理 Skill
-│       ├── skills/claude-worker/      # Claude Worker Skill
+│       ├── skills/                    # sdlc-harness + claude-worker + log-audit
 │       ├── AGENTS.md                  # 项目上下文模板
 │       └── init.sh                    # 一键初始化脚本
 └── samples/
@@ -300,25 +301,64 @@ python worker.py fetch --run-id <run-id>
 
 ---
 
-## Claude Worker Providers
+## Model Registry 与智能路由
 
-| Provider | 模型 | 推荐用途 |
-|----------|------|----------|
-| z-ai | glm-5.1, glm-5 | 后端、高风险终审 |
-| qwen-bailian-coding | qwen3.6-plus | 日常架构、前端 |
-| qwen-bailian | qwen3.6-plus, qwen3-max | 长上下文、大材料 |
-| openrouter | claude-opus, claude-sonnet | 外部独立视角 |
-| kimi | kimi-k2.5 | Review |
-| minimax | MiniMax-M2.5 | 高速铺量 |
-| deepseek | deepseek-chat | 可选 |
-| anthropic | claude models | 原生 Claude |
+模型选择不再硬编码，而是基于 **能力标签系统** 动态匹配：
 
-配置 Provider：
+- 每个模型标注 7 维能力评分（coding / review / architecture / long-context / speed / reasoning / instruction）
+- 路由策略根据任务类型 + 风险等级自动匹配最优模型
+- 支持 Fallback：首选不可用时自动降级
+
+详见：
+- [`core/model-registry.md`](core/model-registry.md) — 模型能力评分表
+- [`core/leaderboard-sources.md`](core/leaderboard-sources.md) — Leaderboard 数据源与更新流程
+- [`core/model-routing-policy.md`](core/model-routing-policy.md) — 基于能力标签的路由算法
+
+### 模型更新机制
+
+采用**半自动 Leaderboard Tracking**：
+- 月度例行检查 LiveCodeBench、Aider、SWE-bench 等数据源
+- 重大模型发布时即时评估
+- 新模型接入流程：EVALUATE → REGISTER → ROUTE → VERIFY
+- 详见 [`core/leaderboard-sources.md`](core/leaderboard-sources.md) §5 更新检查清单
+
+### Provider 配置
+
 ```bash
 python worker.py provider list          # 查看所有 provider
 python worker.py provider set-key <name> # 设置 API key
 python worker.py provider verify <name>  # 验证连通性
 ```
+
+---
+
+## Monitoring Feedback Loop
+
+监控不再是“写完就忘”，而是持续反馈驱动改进的闭环：
+
+```
+日志采集 → 模式检测 → 问题识别 → 任务创建 → 回到 SDLC Design 阶段
+```
+
+按 Gate Profile 分三级：
+
+| 层级 | 内容 | 适用 |
+|------|------|------|
+| **G-Lite (T1)** | 基本结构化日志 | 低风险项目 |
+| **G-Std (T2)** | 日志 + 偏差检测 + 审计报告 | 标准项目 |
+| **G-Full (T3)** | 完整闭环: 设计偏差检测 + 自动任务创建 + 趋势追踪 | 高风险项目 |
+
+检测的典型模式：
+- 同一模块反复被 reject → 建议 refactor
+- Provider 连续失败 → 建议切换
+- 测试首次通过率低 → 分析根因
+- 设计-实现不一致 → 创建对齐任务
+
+使用 `log-audit` skill 触发审计：
+- Qoder: “审计日志” / “检查项目健康度”
+- Hermes/OpenClaw: “audit logs” / “check project health”
+
+详见：[`core/monitoring-feedback-loop.md`](core/monitoring-feedback-loop.md)
 
 ---
 
